@@ -4,10 +4,16 @@ import { num, fmt, fmtRaw, fechaCL, fechaHoraCL, safeName } from '../../util.js'
 import { APP_VERSION } from '../../config.js';
 import { unitLabel } from '../../engine.js';
 import { COLORES, CALIBRES, CONDICION, CALIDAD, FIRMPRO } from './fields.js';
+import { evaluar, NIVELES, rangos } from './tolerancias.js';
+import { fotosParaPdf } from '../../photos.js';
 
 const AZUL = [19, 35, 91];
 const NEGRO = [0, 0, 0];
 const GRIS = [228, 231, 233];
+// Semáforo (mismos colores de la tabla de tolerancias Merex)
+const FUERTE = [[146, 208, 80], [255, 255, 0], [255, 0, 0]];
+const TXT_FUERTE = [NEGRO, NEGRO, [255, 255, 255]];
+const SUAVE = [[220, 240, 205], [255, 247, 170], [255, 205, 200]];
 
 let logoCache = null;
 
@@ -63,11 +69,11 @@ export async function generatePdf(d, calc, form) {
   }
 
   function cell(x, y, w, h, text = '', o = {}) {
-    const { align = 'left', bold = false, size = 6.8, fill = null, value = false, border = true } = o;
+    const { align = 'left', bold = false, size = 6.8, fill = null, value = false, border = true, txt = null } = o;
     if (fill) { doc.setFillColor(...fill); doc.rect(x, y, w, h, border ? 'FD' : 'F'); } else if (border) doc.rect(x, y, w, h);
     if (text === null || text === undefined || text === '') return;
     doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    doc.setTextColor(...(value ? AZUL : NEGRO));
+    doc.setTextColor(...(txt || (value ? AZUL : NEGRO)));
     const t = fit(String(text), w - 2, value ? size + 1 : size);
     const tx = align === 'center' ? x + w / 2 : align === 'right' ? x + w - 1.2 : x + 1.2;
     doc.text(t, tx, y + h / 2, { align, baseline: 'middle' });
@@ -102,6 +108,20 @@ export async function generatePdf(d, calc, form) {
   }
 
   const v = (k) => fmtRaw(d[k]);
+
+  const tol = calc.tol || evaluar(d, calc, { dist: {} });
+  // nivel de tolerancia de cada fila (para pintar su %)
+  const nivFila = {};
+  for (const g of Object.keys(tol)) {
+    for (const it of tol[g].items) {
+      if (it.p.total || it.n === null) continue;
+      it.p.from.forEach((key) => { nivFila[key] = it.n; });
+    }
+  }
+  const tinte = (key) => {
+    const n = nivFila[key];
+    return n !== undefined && (calc[`${key}.pct`] ?? 0) > 0 ? SUAVE[n] : null;
+  };
 
   /* ---------- Encabezado ---------- */
   const logo = await getLogo();
@@ -168,7 +188,7 @@ export async function generatePdf(d, calc, form) {
     ['Firmeza promedio (UD)', (c) => v(`color.${c.id}.firmeza`)]
   ];
   colorRows.forEach(([l, fn]) => {
-    row(12, y, cws, r2, [{ t: l, bold: true, align: l === unit || l === '(%)' ? 'center' : 'left' }, ...COLORES.map((c) => ({ t: fn(c), value: true, align: 'center' }))]);
+    row(12, y, cws, r2, [{ t: l, bold: true, align: l === unit || l === '(%)' ? 'center' : 'left' }, ...COLORES.map((c) => ({ t: fn(c), value: true, align: 'center', fill: l === '(%)' ? tinte(`color.${c.id}`) : null }))]);
     y += r2;
   });
 
@@ -187,68 +207,162 @@ export async function generatePdf(d, calc, form) {
 
   /* ---------- Defectos ---------- */
   y += 3.5;
-  cell(12, y, 186, 5, 'DEFECTOS DE CALIDAD Y CONDICIÓN', { bold: true, align: 'center', size: 7.5, fill: GRIS });
-  y += 7.5;
-  const r3 = 4.4;
+  cell(12, y, 186, 5, 'DEFECTOS DE CONDICIÓN Y CALIDAD', { bold: true, align: 'center', size: 7.5, fill: GRIS });
+  y += 7;
+  const r3 = 4.1;
   const dw = [46, 22, 22];
 
-  function defectTable(x, k, title, rows, totalLabel) {
+  function defectTable(x, k, title, rows, totalLabel, g) {
     let yy = y;
     const pctMode = d[`${k}.modo`] === 'pct';
     cell(x, yy, 90, r3, title, { bold: true, align: 'center', fill: GRIS });
     yy += r3;
-    row(x, yy, dw, r3, [{ t: title, bold: true, size: 6.3 }, { t: unit, bold: true, align: 'center' }, { t: '%', bold: true, align: 'center' }]);
+    row(x, yy, dw, r3, [{ t: 'Defecto', bold: true, size: 6.3 }, { t: unit, bold: true, align: 'center' }, { t: '%', bold: true, align: 'center' }]);
     yy += r3;
     rows.forEach((r) => {
       let l = r.l.toUpperCase();
       if (r.otros && d[`${k}.${r.id}.nombre`]) l = `OTROS: ${d[`${k}.${r.id}.nombre`]}`;
       row(x, yy, dw, r3, [
-        { t: l, size: 6.3 },
+        { t: l, size: 6.1 },
         { t: pctMode ? '' : v(`${k}.${r.id}.cant`), value: true, align: 'center' },
-        { t: P(calc[`${k}.${r.id}.pct`]), value: true, align: 'center' }
+        { t: P(calc[`${k}.${r.id}.pct`]), value: true, align: 'center', fill: tinte(`${k}.${r.id}`) }
       ]);
       yy += r3;
     });
-    row(x, yy, dw, r3, [{ t: totalLabel, bold: true }, { t: '' }, { t: P(calc[`${k}.total`]), value: true, align: 'center', bold: true }]);
-    return yy + r3;
+    const tn = tol[g].total.n;
+    row(x, yy, dw, r3 + 0.6, [
+      { t: totalLabel, bold: true },
+      { t: tn === null ? '' : `Cat. ${NIVELES[g][tn]}`, bold: true, align: 'center', fill: tn === null ? null : FUERTE[tn], txt: tn === null ? null : TXT_FUERTE[tn] },
+      { t: P(calc[`${k}.total`]), value: tn === null, bold: true, align: 'center', fill: tn === null ? null : FUERTE[tn], txt: tn === null ? null : TXT_FUERTE[tn] }
+    ]);
+    return yy + r3 + 0.6;
   }
 
   const yEnd = Math.max(
-    defectTable(12, 'cond', 'DEFECTOS DE CONDICIÓN', CONDICION, 'TOTAL CONDICIÓN'),
-    defectTable(108, 'calid', 'DEFECTOS DE CALIDAD', CALIDAD, 'TOTAL CALIDAD')
+    defectTable(12, 'cond', 'DEFECTOS DE CONDICIÓN', CONDICION, 'TOTAL CONDICIÓN', 'cond'),
+    defectTable(108, 'calid', 'DEFECTOS DE CALIDAD', CALIDAD, 'TOTAL CALIDAD', 'calid')
   );
 
   y = yEnd + 3;
+  const ox = tol.cond.items.find((it) => it.p.id === 'oxidada');
+  const bx = tol.calid.items.find((it) => it.p.id === 'brix');
   row(12, y, [46, 44], 5.5, [{ t: 'SUMA TOTAL DE DEFECTOS', bold: true }, { t: calc.suma !== null ? P(calc.suma) + ' %' : '', value: true, align: 'center', bold: true }]);
   row(12, y + 5.5, [46, 44], 5.5, [{ t: 'ESTIMACIÓN EXPORTABLE', bold: true }, { t: calc.exportable !== null ? P(calc.exportable) + ' %' : '', value: true, align: 'center', bold: true }]);
+  row(12, y + 11, [46, 44], 5.5, [{ t: 'Frutos pulpa oxidada (%)', bold: true }, { t: ox.v !== null ? P(ox.v) + ' %' : '', value: true, align: 'center', fill: ox.n === null ? null : SUAVE[ox.n] }]);
   row(108, y, [46, 44], 5.5, [{ t: 'Presencia racimo (%)', bold: true }, { t: v('racimo'), value: true, align: 'center' }]);
   row(108, y + 5.5, [46, 44], 5.5, [{ t: 'Presencia de hoja', bold: true }, { t: d.hoja, value: true, align: 'center' }]);
+  row(108, y + 11, [46, 44], 5.5, [{ t: 'Brix promedio (°Bx)', bold: true }, { t: bx.v !== null ? P(bx.v) : '', value: true, align: 'center', fill: bx.n === null ? null : SUAVE[bx.n] }]);
 
-  /* ---------- Observaciones ---------- */
-  y += 14;
-  const obsTop = y;
-  const obsH = 44;
-  doc.rect(12, obsTop, 186, obsH);
-  label(14, obsTop + 3.5, 'OBSERVACIONES:', 7.5);
+  y += 16.5 + 4;
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6.5);
+  doc.setTextColor(90, 90, 90);
+  doc.text('Colores según tolerancias "Bulk directo de huerto": verde = dentro · amarillo = en el límite · rojo = fuera. Detalle en la página 2.', 105, y, { align: 'center', baseline: 'middle' });
 
-  // Firmeza FirmPro
-  let ty = obsTop + 6.5;
+  function pie() {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(130, 130, 130);
+    doc.text(`Generado el ${fechaHoraCL(Date.now())} · Formularios Merex v${APP_VERSION}`, 105, 292, { align: 'center' });
+    doc.text(`Pág. ${doc.getNumberOfPages()}`, 198, 292, { align: 'right' });
+  }
+
+  function cabecera(titulo) {
+    if (logo) doc.addImage(logo, 'PNG', 12, 8, 30, 30 / 2.285);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(...NEGRO);
+    doc.text(titulo, 105, 12, { align: 'center', baseline: 'middle' });
+    const id = [d.productor, d.variedad, fechaCL(d.fecha), d.lote ? `Lote ${d.lote}` : ''].filter(Boolean).join('  ·  ');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(...AZUL);
+    doc.text(fit(id, 120, 8), 105, 17.5, { align: 'center', baseline: 'middle' });
+    doc.setDrawColor(...NEGRO);
+    doc.setLineWidth(0.3);
+    doc.line(12, 23, 198, 23);
+    doc.setLineWidth(0.2);
+  }
+  pie();
+
+  /* ================= Página 2: tolerancias, firmeza, brix, observaciones y firma ================= */
+  doc.addPage();
+  cabecera('INFORMECAMPO CEREZAS — EVALUACIÓN DE TOLERANCIAS Y CIERRE');
+  y = 27;
+  const tw = [72, 20, 26, 26, 26, 16];
+  const r4 = 4.3;
+  cell(12, y, 186, 5, 'TOLERANCIAS BULK DIRECTO DE HUERTO', { bold: true, align: 'center', size: 7.5, fill: GRIS });
+  y += 5;
+  for (const [g, nombre] of [['cond', 'CONDICIÓN'], ['calid', 'CALIDAD']]) {
+    const niv = NIVELES[g];
+    row(12, y, tw, r4, [
+      { t: `PARÁMETROS ${nombre}`, bold: true, fill: GRIS },
+      { t: 'Valor', bold: true, align: 'center', fill: GRIS },
+      { t: `${niv[0]} (%)`, bold: true, align: 'center', fill: FUERTE[0] },
+      { t: `${niv[1]} (%)`, bold: true, align: 'center', fill: FUERTE[1] },
+      { t: `${niv[2]} (%)`, bold: true, align: 'center', fill: FUERTE[2], txt: TXT_FUERTE[2] },
+      { t: 'Result.', bold: true, align: 'center', fill: GRIS }
+    ]);
+    y += r4;
+    for (const it of tol[g].items) {
+      const rg = rangos(it.p);
+      const val = it.v === null ? '' : it.p.unit ? `${P(it.v)} ${it.p.unit}` : `${P(it.v)} %`;
+      row(12, y, tw, r4, [
+        { t: it.p.total ? it.p.l : it.p.l, bold: !!it.p.total, size: 6.5 },
+        { t: val, value: true, align: 'center', bold: !!it.p.total },
+        ...[0, 1, 2].map((i) => ({ t: rg[i] || '', align: 'center', size: 6.3, fill: it.n === i ? SUAVE[i] : null, bold: it.n === i })),
+        { t: it.n === null ? '–' : niv[it.n], bold: true, align: 'center', fill: it.n === null ? null : FUERTE[it.n], txt: it.n === null ? null : TXT_FUERTE[it.n] }
+      ]);
+      y += r4;
+    }
+    y += 2;
+  }
+  const resTxt = (g, nombre) => {
+    const pe = tol[g].peor;
+    if (!pe) return `${nombre}: sin datos`;
+    const fuera = tol[g].items.filter((it) => it.n === pe.n && pe.n > 0).map((it) => it.p.l.toLowerCase());
+    return `${nombre}: ${NIVELES[g][pe.n]}${fuera.length ? ` (${fuera.join(', ')})` : ' (todo en tolerancia)'}`;
+  };
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.2);
+  doc.setTextColor(...NEGRO);
+  const resLines = doc.splitTextToSize(`Peor parámetro evaluado — ${resTxt('cond', 'Condición')} · ${resTxt('calid', 'Calidad')}`, 186);
+  resLines.forEach((ln, i) => doc.text(ln, 12, y + 1 + i * 3.4, { baseline: 'middle' }));
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.2);
+  doc.setTextColor(90, 90, 90);
+  y += resLines.length * 3.4 + 2;
+  doc.text('Equivalencias: partidura = lateral + apical + medialuna + por agua; machucón incluye hombros; pudrición incluye pudrición seca; russet y cicatrices = russet + herida cicatrizada;', 12, y, { baseline: 'middle' });
+  doc.text('frutos rojos = color rojo claro; frutos verdes = falta de color; Brix = promedio de lecturas Dark y Light. Filas sin dato cuentan como 0 si la tabla tiene datos.', 12, y + 3, { baseline: 'middle' });
+
+  // Firmeza FirmPro y Brix
+  let ty = y + 8;
   const fw = [30, 18, 18];
-  row(14, ty, fw, r3, [{ t: 'FIRMEZA FIRMPRO', bold: true, fill: GRIS }, { t: 'n° frutos', bold: true, align: 'center', fill: GRIS }, { t: '%', bold: true, align: 'center', fill: GRIS }]);
+  row(12, ty, fw, r3, [{ t: 'FIRMEZA FIRMPRO', bold: true, fill: GRIS }, { t: 'n° frutos', bold: true, align: 'center', fill: GRIS }, { t: '%', bold: true, align: 'center', fill: GRIS }]);
   FIRMPRO.forEach((r, i) => {
-    row(14, ty + r3 * (i + 1), fw, r3, [{ t: r.l }, { t: v(`firmpro.${r.id}`), value: true, align: 'center' }, { t: P(calc[`firmpro.${r.id}.pct`]), value: true, align: 'center' }]);
+    row(12, ty + r3 * (i + 1), fw, r3, [{ t: r.l }, { t: v(`firmpro.${r.id}`), value: true, align: 'center' }, { t: P(calc[`firmpro.${r.id}.pct`]), value: true, align: 'center' }]);
   });
-
-  // Brix
-  const bw = [20, 66, 24];
-  row(86, ty, bw, r3, [{ t: 'BRIX (°Bx)', bold: true, fill: GRIS }, { t: 'Lecturas', bold: true, align: 'center', fill: GRIS }, { t: 'Promedio', bold: true, align: 'center', fill: GRIS }]);
+  const bw = [20, 76, 24];
+  row(78, ty, bw, r3, [{ t: 'BRIX (°Bx)', bold: true, fill: GRIS }, { t: 'Lecturas', bold: true, align: 'center', fill: GRIS }, { t: 'Promedio', bold: true, align: 'center', fill: GRIS }]);
   [['Dark', 'brix.dark'], ['Light', 'brix.light']].forEach(([l, k], i) => {
     const lect = (calc[`${k}.vals`] || []).map((x) => fmt(x, 2)).join('  ·  ');
-    row(86, ty + r3 * (i + 1), bw, r3, [{ t: l }, { t: lect, value: true, align: 'center' }, { t: P(calc[`${k}.avg`]), value: true, align: 'center', bold: true }]);
+    row(78, ty + r3 * (i + 1), bw, r3, [{ t: l }, { t: lect, value: true, align: 'center' }, { t: P(calc[`${k}.avg`]), value: true, align: 'center', bold: true }]);
   });
 
-  // Texto libre
-  ty = obsTop + 6.5 + r3 * 4 + 3;
+  /* ---------- Observaciones ---------- */
+  const obsTop = ty + r3 * 4 + 4;
+  const fy = 280;
+  const obsH = fy - 9 - obsTop;
+  doc.rect(12, obsTop, 186, obsH);
+  label(14, obsTop + 3.5, 'OBSERVACIONES:', 7.5);
+  const nf = Array.isArray(d.fotos) ? d.fotos.length : 0;
+  if (nf) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(7);
+    doc.setTextColor(90, 90, 90);
+    doc.text(`Se adjuntan ${nf} foto(s) en el anexo fotográfico.`, 196, obsTop + 3.5, { align: 'right', baseline: 'middle' });
+  }
+  ty = obsTop + 7;
   const obs = String(d.observaciones || '').trim();
   let resto = [];
   if (obs) {
@@ -259,12 +373,11 @@ export async function generatePdf(d, calc, form) {
     const maxLines = Math.floor((obsTop + obsH - 1.5 - ty) / 3.6);
     const show = lines.slice(0, maxLines);
     resto = lines.slice(maxLines);
-    if (resto.length && show.length) show[show.length - 1] += '  (continúa en pág. 2)';
+    if (resto.length && show.length) show[show.length - 1] += '  (continúa en la página siguiente)';
     show.forEach((ln, i) => doc.text(ln, 15, ty + 1.5 + i * 3.6, { baseline: 'middle' }));
   }
 
   /* ---------- Inspector y firma ---------- */
-  const fy = obsTop + obsH + 9;
   label(12, fy, 'Inspector:');
   lineValue(28, 102, fy, d.inspector);
   label(110, fy, 'Firma:');
@@ -282,29 +395,53 @@ export async function generatePdf(d, calc, form) {
       doc.addImage(d.firma, 'PNG', 122 + (76 - w) / 2, fy + 1.2 - h, w, h);
     }
   }
-
-  function pie() {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.setTextColor(130, 130, 130);
-    doc.text(`Generado el ${fechaHoraCL(Date.now())} · Formularios Merex v${APP_VERSION}`, 105, 292, { align: 'center' });
-  }
   pie();
 
   if (resto.length) {
     doc.addPage();
-    if (logo) doc.addImage(logo, 'PNG', 12, 9, 30, 30 / 2.285);
-    label(105 - 30, 16, 'INFORMECAMPO CEREZAS — OBSERVACIONES (continuación)', 9);
+    cabecera('INFORMECAMPO CEREZAS — OBSERVACIONES (continuación)');
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(...AZUL);
     let yy = 30;
     resto.forEach((ln) => {
-      if (yy > 285) { pie(); doc.addPage(); yy = 20; }
+      if (yy > 285) { pie(); doc.addPage(); cabecera('INFORMECAMPO CEREZAS — OBSERVACIONES (continuación)'); doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...AZUL); yy = 30; }
       doc.text(ln, 14, yy);
       yy += 3.8;
     });
     pie();
+  }
+
+  /* ---------- Anexo fotográfico: 2 fotos por página ---------- */
+  const fotos = await fotosParaPdf(d.fotos);
+  for (let i = 0; i < fotos.length; i++) {
+    const pos = i % 2;
+    if (pos === 0) {
+      doc.addPage();
+      cabecera('INFORMECAMPO CEREZAS — ANEXO FOTOGRÁFICO');
+    }
+    const f = fotos[i];
+    const top = pos === 0 ? 27 : 157;
+    const boxW = 186;
+    const boxH = 118;
+    const k = Math.min(boxW / f.w, boxH / f.h);
+    const w = f.w * k;
+    const h = f.h * k;
+    doc.addImage(f.data, 'JPEG', 12 + (boxW - w) / 2, top + (boxH - h) / 2, w, h);
+    doc.setDrawColor(200, 200, 200);
+    doc.rect(12, top, boxW, boxH);
+    doc.setDrawColor(...NEGRO);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...NEGRO);
+    const cap = `Foto ${f.n}`;
+    doc.text(cap, 12, top + boxH + 4, { baseline: 'middle' });
+    if (f.nota) {
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(...AZUL);
+      doc.text(fit(`— ${f.nota}`, 170, 8), 12 + doc.getTextWidth(cap) + 2, top + boxH + 4, { baseline: 'middle' });
+    }
+    if (pos === 1 || i === fotos.length - 1) pie();
   }
 
   const fname = [

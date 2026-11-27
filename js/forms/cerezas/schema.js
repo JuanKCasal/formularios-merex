@@ -1,8 +1,12 @@
 // Formulario "Informecampo Cerezas" (formato impreso Merex)
 import { todayISO, nowHM } from '../../util.js';
-import { compute, renderSummary, strip } from './compute.js';
+import { compute, renderSummary, strip, decorate } from './compute.js';
 import { generatePdf } from './pdf.js';
-import { COLORES, CALIBRES, CONDICION, CALIDAD, FIRMPRO } from './fields.js';
+import { COLORES, CALIBRES, CONDICION, CALIDAD, OXIDADA, FIRMPRO } from './fields.js';
+import { num } from '../../util.js';
+
+// Versión de los datos del informe (sube cuando cambian las filas)
+const DATA_V = 2;
 
 const form = {
   id: 'cerezas',
@@ -25,8 +29,41 @@ const form = {
       unidad: 'gr',
       'brix.dark': ['', '', ''],
       'brix.light': ['', '', ''],
-      inspector: settings.inspector || ''
+      inspector: settings.inspector || '',
+      fotos: [],
+      _v: DATA_V
     };
+  },
+
+  /** Adapta informes guardados con versiones anteriores. Devuelve true si cambió algo. */
+  migrate(d) {
+    if ((d._v || 1) >= DATA_V) return false;
+    // v1 -> v2: Daño insecto y Pitting pasan de calidad a condición
+    const muestra = num(d.muestra);
+    const modoDe = (k) => d[`${k}.modo`] || 'cant';
+    for (const id of ['danoInsecto', 'pitting']) {
+      const cant = d[`calid.${id}.cant`];
+      const pct = d[`calid.${id}.pct`];
+      const destPct = modoDe('cond') === 'pct';
+      const origPct = modoDe('calid') === 'pct';
+      if (destPct === origPct) {
+        if (cant !== undefined) d[`cond.${id}.cant`] = cant;
+        if (pct !== undefined) d[`cond.${id}.pct`] = pct;
+      } else if (destPct) {
+        const c = num(cant);
+        if (pct !== undefined && pct !== '') d[`cond.${id}.pct`] = pct;
+        else if (c !== null && muestra > 0) d[`cond.${id}.pct`] = String(Math.round((c / muestra) * 1000) / 10).replace('.', ',');
+      } else {
+        const q = num(pct);
+        if (cant !== undefined && cant !== '') d[`cond.${id}.cant`] = cant;
+        else if (q !== null && muestra > 0) d[`cond.${id}.cant`] = String(Math.round(q * muestra) / 100).replace('.', ',');
+      }
+      delete d[`calid.${id}.cant`];
+      delete d[`calid.${id}.pct`];
+    }
+    if (!Array.isArray(d.fotos)) d.fotos = [];
+    d._v = DATA_V;
+    return true;
   },
 
   recordTitle: (d) => d.productor || 'Sin productor',
@@ -84,7 +121,10 @@ const form = {
       id: 'condicion',
       title: 'Defectos de condición',
       items: [
-        { type: 'dist', k: 'cond', colLabel: 'Defecto', rows: CONDICION, totalLabel: 'Total condición' }
+        { type: 'dist', k: 'cond', colLabel: 'Defecto', rows: CONDICION, totalLabel: 'Total condición' },
+        { type: 'heading', label: 'Pulpa oxidada', help: 'Se evalúa aparte: no suma al total de condición.' },
+        { type: 'dist', k: 'oxid', colLabel: 'Frutos', rows: OXIDADA, noTotal: true },
+        { type: 'slot', id: 'tol-cond' }
       ]
     },
     {
@@ -93,7 +133,8 @@ const form = {
       items: [
         { type: 'dist', k: 'calid', colLabel: 'Defecto', rows: CALIDAD, totalLabel: 'Total calidad' },
         { type: 'number', k: 'racimo', label: 'Presencia racimo', unit: '%', half: true },
-        { type: 'text', k: 'hoja', label: 'Presencia de hoja', half: true }
+        { type: 'text', k: 'hoja', label: 'Presencia de hoja', half: true },
+        { type: 'slot', id: 'tol-calid' }
       ]
     },
     {
@@ -104,6 +145,13 @@ const form = {
         { type: 'heading', label: 'Brix (°Bx)' },
         { type: 'readings', k: 'brix.dark', label: 'Dark' },
         { type: 'readings', k: 'brix.light', label: 'Light' }
+      ]
+    },
+    {
+      id: 'fotos',
+      title: 'Fotos',
+      items: [
+        { type: 'photos', k: 'fotos', help: 'Hasta 12 fotos. Se guardan reducidas en este teléfono y salen como anexo al final del PDF.' }
       ]
     },
     {
@@ -125,6 +173,7 @@ const form = {
   compute,
   renderSummary,
   strip,
+  decorate,
   generatePdf
 };
 

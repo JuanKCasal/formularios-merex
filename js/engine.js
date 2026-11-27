@@ -83,7 +83,7 @@ const R = {
     let body;
     if (cards) {
       body = f.rows.map((r) => `
-        <div class="dcard">
+        <div class="dcard" data-row="${k}.${r.id}">
           <div class="dcard-t">${rowLabel(r)}</div>
           <div class="dcard-g">
             <label class="mini c-cant-w"><span>Cant. (${unitTag})</span>${cantIn(r)}</label>
@@ -95,11 +95,11 @@ const R = {
     } else {
       body = `
         <div class="dist-row dist-cols"><span>${esc(f.colLabel || '')}</span><span class="c-cant">Cant. (${unitTag})</span><span class="c-pcthead">%</span></div>
-        ${f.rows.map((r) => `<div class="dist-row">${rowLabel(r)}${cantIn(r)}${pctOut(r)}${pctIn(r)}</div>`).join('')}`;
+        ${f.rows.map((r) => `<div class="dist-row" data-row="${k}.${r.id}">${rowLabel(r)}${cantIn(r)}${pctOut(r)}${pctIn(r)}</div>`).join('')}`;
     }
 
-    const total = f.totalLabel
-      ? `<div class="dist-total"><span>${esc(f.totalLabel)}</span><output data-calc="${k}.total" data-suffix="%"></output></div>`
+    const total = f.noTotal ? '' : f.totalLabel
+      ? `<div class="dist-total" data-total="${k}"><span>${esc(f.totalLabel)}</span><span class="tot-v"><i class="tol-badge" data-badge="${k}"></i><output data-calc="${k}.total" data-suffix="%"></output></span></div>`
       : `<div class="dist-total soft"><span>Suma</span><output data-calc="${k}.total" data-suffix="%"></output></div>`;
 
     return `<div class="dist ${cards ? 'cards' : ''} mode-${modo}" data-dist="${k}">${head}${body}${total}</div>`;
@@ -144,6 +144,17 @@ const R = {
   },
   summary() {
     return `<div data-summary></div>`;
+  },
+  // Espacio que llena el propio formulario (p. ej. tarjeta de tolerancias)
+  slot(f) {
+    return `<div class="slot" data-slot="${esc(f.id)}"></div>`;
+  },
+  photos(f) {
+    return `<div class="photos" data-photos="${esc(f.k)}">${f.help ? `<p class="help">${esc(f.help)}</p>` : ''}<div class="ph-grid"></div>
+      <div class="ph-acts">
+        <label class="btn primary">${icon.camera} Tomar foto<input type="file" accept="image/*" capture="environment" data-phadd="${esc(f.k)}" hidden></label>
+        <label class="btn secondary">${icon.image} Desde galería<input type="file" accept="image/*" multiple data-phadd="${esc(f.k)}" hidden></label>
+      </div></div>`;
   }
 };
 

@@ -1,6 +1,6 @@
 /* Service worker: deja la app disponible sin conexión.
    IMPORTANTE: al publicar cambios, sube VERSION (y APP_VERSION en js/config.js). */
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const CACHE = 'formularios-merex-' + VERSION;
 
 const ASSETS = [
@@ -15,11 +15,13 @@ const ASSETS = [
   'js/engine.js',
   'js/signature.js',
   'js/ui.js',
+  'js/photos.js',
   'js/forms/registry.js',
   'js/forms/cerezas/schema.js',
   'js/forms/cerezas/fields.js',
   'js/forms/cerezas/compute.js',
   'js/forms/cerezas/pdf.js',
+  'js/forms/cerezas/tolerancias.js',
   'vendor/jspdf.umd.min.js',
   'img/logo_merex.svg',
   'img/logo_merex.png',

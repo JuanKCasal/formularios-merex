@@ -1,4 +1,6 @@
-// Filas de cada tabla del Informecampo Cerezas (mismo orden que el formato impreso)
+// Filas de cada tabla del Informecampo Cerezas.
+// v1.1: Daño insecto y Pitting pasan a condición (pedido Merex) y se agregan
+// los parámetros de la tabla de tolerancias "Bulk directo de huerto".
 
 export const COLORES = [
   { id: 'faltaColor', l: 'Falta de color' },
@@ -31,6 +33,12 @@ export const CONDICION = [
   { id: 'partiduraApical', l: 'Partidura apical' },
   { id: 'medialuna', l: 'Medialuna' },
   { id: 'partiduraAgua', l: 'Partidura por agua' },
+  { id: 'heridaAbierta', l: 'Herida abierta' },
+  { id: 'danoInsecto', l: 'Daño insecto' },
+  { id: 'pitting', l: 'Pitting' },
+  { id: 'desgarroPedicelar', l: 'Desgarro pedicelar' },
+  { id: 'exudacion', l: 'Exudación / colapsado' },
+  { id: 'sobreMadura', l: 'Fruta sobre madura' },
   { id: 'otros', l: 'Otros', otros: true }
 ];
 
@@ -43,11 +51,19 @@ export const CALIDAD = [
   { id: 'danoSol', l: 'Daño por sol' },
   { id: 'faltaColor', l: 'Falta color' },
   { id: 'sinPedicelo', l: 'Frutos s/ pedicelo' },
-  { id: 'danoInsecto', l: 'Daño insecto' },
-  { id: 'tierra', l: 'Tierra / residuo' },
+  { id: 'tierra', l: 'Polvo / tierra' },
+  { id: 'contaminacion', l: 'Contaminación / residuos / elem. extraños' },
+  { id: 'insectos', l: 'Insectos' },
+  { id: 'preCalibre', l: 'Pre-calibre' },
+  { id: 'restoFloral', l: 'Resto floral' },
+  { id: 'faltaPruina', l: 'Falta de pruina (bloom)' },
   { id: 'sutura', l: 'Sutura' },
-  { id: 'pitting', l: 'Pitting' },
   { id: 'otros', l: 'Otros', otros: true }
+];
+
+// Se mide aparte (no suma al total de condición, igual que en la tabla Merex)
+export const OXIDADA = [
+  { id: 'pulpaOxidada', l: 'Frutos pulpa oxidada' }
 ];
 
 export const FIRMPRO = [

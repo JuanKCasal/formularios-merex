@@ -4,6 +4,7 @@ import { FORMS, getForm } from './forms/registry.js';
 import { listRecords, getRecord, saveRecord, deleteRecord, getSettings, saveSettings, rememberValue, requestPersist } from './storage.js';
 import { renderSection, renderReadings, datalists, computeGeneric, applyCalc } from './engine.js';
 import { mountSignature } from './signature.js';
+import { mountPhotos, delFotosDeInforme, allFotos, putFoto, blobToDataURL, dataURLToBlob } from './photos.js';
 import { icon, toast, confirmBox } from './ui.js';
 import { uid, esc, debounce, fechaHoraCL, todayISO, nowHM } from './util.js';
 
@@ -136,7 +137,7 @@ function screenList(form) {
         text: `${esc(form.recordTitle(r?.data || {}))} — se borrará de este teléfono y no se puede recuperar.`,
         ok: 'Eliminar', danger: true
       });
-      if (ok) { deleteRecord(del.dataset.del); toast('Informe eliminado'); screenList(form); }
+      if (ok) { deleteRecord(del.dataset.del); delFotosDeInforme(del.dataset.del); toast('Informe eliminado'); screenList(form); }
     } else if (dup) {
       const r = getRecord(dup.dataset.dup);
       if (!r) return;
@@ -162,6 +163,7 @@ function screenEditor(form, id) {
     return;
   }
   const d = rec.data;
+  if (form.migrate && form.migrate(d)) saveRecord(rec);
   const secs = form.sections;
   let cur = Math.min(Math.max(0, rec.section || 0), secs.length - 1);
   let lastWarnings = [];
@@ -213,8 +215,9 @@ function screenEditor(form, id) {
     const { warnings } = form.compute(d, calc, meta);
     lastWarnings = warnings;
     applyCalc(ed, d, calc);
+    if (form.decorate) form.decorate(ed, d, calc);
     document.getElementById('strip').innerHTML = form.strip(calc)
-      .map((s) => `<div class="${s.strong ? 'strong' : ''}"><span>${s.l}</span><b>${s.v}</b></div>`).join('');
+      .map((s) => `<div class="${s.strong ? 'strong' : ''} ${s.cls || ''}"><span>${s.l}</span><b>${s.v}</b></div>`).join('');
     const warnSecs = new Set(warnings.filter((w) => w.level === 'warn').map((w) => w.section));
     stepsEl.querySelectorAll('[data-step]').forEach((b) => {
       b.classList.toggle('has-warn', warnSecs.has(secs[+b.dataset.step].id));
@@ -253,6 +256,12 @@ function screenEditor(form, id) {
         onChange: (v) => { d[k] = v; ph.classList.toggle('hide', !!v); changed(); }
       })
     });
+  });
+
+  // Fotos
+  const galerias = [];
+  ed.querySelectorAll('[data-photos]').forEach((el) => {
+    galerias.push(mountPhotos(el, { recId: rec.id, d, k: el.dataset.photos, onChange: changed }));
   });
 
   // Entradas de texto
@@ -414,6 +423,7 @@ function screenEditor(form, id) {
     document.removeEventListener('visibilitychange', onHide);
     window.removeEventListener('pagehide', persist.flush);
     pads.forEach((p) => p.pad.destroy());
+    galerias.forEach((g) => g.destroy());
   };
 
   go(cur);
@@ -460,7 +470,7 @@ function screenAjustes() {
 
       <section class="card">
         <h2>Respaldo</h2>
-        <p class="help">Los informes viven solo en este teléfono. Descarga un respaldo de vez en cuando o para pasarlos a otro equipo.</p>
+        <p class="help">Los informes viven solo en este teléfono. Descarga un respaldo de vez en cuando o para pasarlos a otro equipo. El respaldo incluye las fotos.</p>
         <div class="actions">
           <button class="btn secondary" id="bkDown">${icon.download} Descargar respaldo</button>
           <label class="btn ghost" for="bkFile">${icon.upload} Restaurar respaldo</label>
@@ -480,8 +490,12 @@ function screenAjustes() {
     toast('Ajustes guardados');
   };
 
-  document.getElementById('bkDown').onclick = () => {
-    const data = { app: 'formularios-merex', version: APP_VERSION, exported: new Date().toISOString(), settings: getSettings(), records: listRecords() };
+  document.getElementById('bkDown').onclick = async () => {
+    const fotos = {};
+    try {
+      for (const f of await allFotos()) fotos[f.id] = { rec: f.rec, w: f.w, h: f.h, data: await blobToDataURL(f.blob) };
+    } catch (e) { console.warn('fotos', e); }
+    const data = { app: 'formularios-merex', version: APP_VERSION, exported: new Date().toISOString(), settings: getSettings(), records: listRecords(), fotos };
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
     download(blob, `respaldo_formularios_merex_${todayISO()}.json`);
   };
@@ -493,6 +507,10 @@ function screenAjustes() {
       const data = JSON.parse(await file.text());
       if (data.app !== 'formularios-merex' || !Array.isArray(data.records)) throw new Error('formato');
       let n = 0;
+      let nf = 0;
+      for (const [id, f] of Object.entries(data.fotos || {})) {
+        try { await putFoto({ id, rec: f.rec, w: f.w, h: f.h, blob: await dataURLToBlob(f.data), created: Date.now() }); nf++; } catch (e) { console.warn('foto', e); }
+      }
       for (const r of data.records) {
         const ex = getRecord(r.id);
         if (!ex || (r.updated || 0) > (ex.updated || 0)) {
@@ -511,7 +529,7 @@ function screenAjustes() {
         if (!cur.inspector && data.settings.inspector) cur.inspector = data.settings.inspector;
         saveSettings(cur);
       }
-      toast(`Respaldo restaurado: ${n} informe(s)`);
+      toast(`Respaldo restaurado: ${n} informe(s)${nf ? `, ${nf} foto(s)` : ''}`);
       screenAjustes();
     } catch {
       toast('El archivo no es un respaldo válido');

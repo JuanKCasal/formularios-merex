@@ -18,17 +18,21 @@ Publicado en: https://juankcasal.github.io/formularios-merex/
 
 ## Informecampo Cerezas
 
-Secciones: Recepción · Temperatura y envase · Color · Calibres · Defectos de condición · Defectos de calidad · Firmeza y Brix · Observaciones y firma · Resumen y PDF.
+Secciones: Recepción · Temperatura y envase · Color · Calibres · Defectos de condición · Defectos de calidad · Firmeza y Brix · Fotos · Observaciones y firma · Resumen y PDF.
 
 Cálculos:
 
 - Unidad de la muestra a elegir por informe: gramos o n° de frutos.
 - % de cada fila = cantidad ÷ muestra × 100 (en color, calibres y defectos también se puede ingresar el % directo).
 - Total condición, total calidad, suma total de defectos y **estimación exportable = 100 − suma**.
-- Sutura y Pitting cuentan como defectos de calidad.
+- Desde v1.1 (pedido Merex): Daño insecto, Pitting y Herida abierta son defectos de **condición**; Sutura sigue en calidad. Los informes guardados con v1.0 se adaptan solos al abrirlos.
+- **Tolerancias «Bulk directo de huerto»** (`js/forms/cerezas/tolerancias.js`): semáforo verde / amarillo / rojo (A-B-C en condición, 1-2-3 en calidad) en cada defecto, en los totales, en la barra inferior, en el resumen y en el PDF (página 2 con la tabla completa). Los rangos y las equivalencias entre filas y parámetros se cambian en ese archivo.
+- Frutos pulpa oxidada se mide aparte y no suma al total de condición.
 - Firmeza FirmPro: n° de frutos por categoría → %.
 - Brix Dark y Light: varias lecturas con promedio.
 - Avisos: distribución de color o calibres que no suma 100 %, defecto mayor que la muestra, datos faltantes.
+
+Fotos: hasta 12 por informe (cámara o galería), con comentario. Se reducen a 1600 px y se guardan en IndexedDB del teléfono; salen como anexo al final del PDF (2 por página) y se incluyen en el respaldo JSON.
 
 **Pendiente:** los valores de *Código* y *Revisión* del documento Merex se completan en `js/forms/cerezas/schema.js` (`codigo` y `revision`).
 
@@ -42,8 +46,9 @@ css/app.css                 estilos
 js/app.js                   pantallas: inicio, lista, editor, ajustes
 js/engine.js                motor genérico: dibuja campos desde el esquema y calcula
 js/storage.js               guardado local
+js/photos.js                fotos (IndexedDB, compresión, galería)
 js/forms/registry.js        lista de formularios
-js/forms/cerezas/           schema.js (campos), fields.js (filas), compute.js (totales y avisos), pdf.js
+js/forms/cerezas/           schema.js (campos), fields.js (filas), compute.js (totales y avisos), tolerancias.js, pdf.js
 vendor/jspdf.umd.min.js     generador de PDF
 img/, icons/                logo e íconos
 ```
